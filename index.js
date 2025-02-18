@@ -2,28 +2,39 @@ const express = require('express');
 const { buildSchema } = require('graphql');
 const { graphqlHTTP } = require('express-graphql');
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const userModel = require('./model/User');
 const employeeModel = require('./model/Employee');
 
 const app = express();
 const SERVER_PORT = 4000;
 
-//Schema
+// GraphQL Schema
 const gqlSchema = buildSchema(`
     type Query {
-        welcome: String
-        user: User
-        users: [User]
+        login(email: String!, password: String!): String
+        getAllEmployees: [Employee]
+        getEmployeeById(id: ID!): Employee
+        searchEmployee(designation: String, department: String): [Employee]
     }
+
     type Mutation {
-        signup(
-            username: String!, 
-            email: String!, 
-            password: String!, 
-            created_at: String, 
-            updated_at: String
-        ): User
+        signup(username: String!, email: String!, password: String!): User
+        addEmployee(
+            first_name: String!,
+            last_name: String!,
+            email: String!,
+            gender: String,
+            designation: String!,
+            salary: Float!,
+            date_of_joining: String!,
+            department: String!,
+            employee_photo: String
+        ): Employee
+        updateEmployee(id: ID!, first_name: String, last_name: String, email: String, designation: String, salary: Float, department: String, employee_photo: String): Employee
+        deleteEmployee(id: ID!): String
     }
+
     type User {
         id: ID!
         username: String!
@@ -32,6 +43,7 @@ const gqlSchema = buildSchema(`
         created_at: String
         updated_at: String
     }
+
     type Employee {
         id: ID!
         first_name: String!
@@ -48,35 +60,82 @@ const gqlSchema = buildSchema(`
     }
 `);
 
-//Root resolver
+// Resolvers root
 const rootResolver = {
- 
-    signup: async (user) => {
-        console.log(user);
-        const { username, email, password } = user;
-        const newUser = new userModel({
-            username: username,
-            email: email,
-            password: password
-        });
-        const result = await newUser.save();
-        return result;
+    // Uer Registration
+    signup: async ({ username, email, password }) => {
+        try {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            const newUser = new userModel({ username, email, password: hashedPassword });
+            return await newUser.save();
+        } catch (error) {
+            throw new Error('Signup failed');
+        }
     },
 
-    Login: async () => {
-        const user = await userModel.find({});
-        return user;
-      },
+    // Use Login
+    login: async ({ email, password }) => {
+        try {
+            console.log('Login and PASS');
+            console.log(email, password);
+            const user = await userModel.findOne({ email });
+            console.log('This USER');
+            console.log(user);
+            console.log(await userModel.find());
+
+            if (!user) throw new Error('User not found');
+            const isValid = await bcrypt.compare(password, user.password);
+            if (!isValid) throw new Error('Invalid credentials');
+
+            return "Log in was successful";
+        } catch (error) {
+            throw new Error('Login failed');
+        }
+    },
+
+    // Get All Employees
+    getAllEmployees: async () => {
+        return await employeeModel.find();
+    },
+
+    // Get Employee By ID
+    getEmployeeById: async ({ id }) => {
+        return await employeeModel.findById(id);
+    },
+
+    // Search Employee By Designation or Department
+    searchEmployee: async ({ designation, department }) => {
+        let query = {};
+        if (designation) query.designation = designation;
+        if (department) query.department = department;
+        return await employeeModel.find(query);
+    },
+
+    // Add New Employee
+    addEmployee: async (employeeInput) => {
+        const newEmployee = new employeeModel(employeeInput);
+        return await newEmployee.save();
+    },
+
+    // Update Employee By ID
+    updateEmployee: async ({ id, ...updates }) => {
+        return await employeeModel.findByIdAndUpdate(id, updates, { new: true });
+    },
+
+    // Delete Employee By ID
+    deleteEmployee: async ({ id }) => {
+        await employeeModel.findByIdAndDelete(id);
+        return 'Employee deleted successfully';
+    }
 };
 
-//GraphHTTP Object
+// iddleware
 const graphqlHttp = graphqlHTTP({
     schema: gqlSchema,
     rootValue: rootResolver,
     graphiql: true
-    });
+});
 
-//Middleware
 app.use('/graphql', graphqlHttp);
 
 //Connect MongoDB
@@ -103,8 +162,10 @@ const connectDB = async() => {
       }
   }
 
+
+// Start Server
 app.listen(SERVER_PORT, () => {
-  console.log(`Server is running on port ${SERVER_PORT}`);
-  connectDB();
-  console.log(`http://localhost:4000/graphql`);
+    console.log(`Server is running on port ${SERVER_PORT}`);
+    connectDB();
+    console.log(`GraphQL Playground: http://localhost:${SERVER_PORT}/graphql`);
 });
